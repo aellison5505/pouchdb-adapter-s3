@@ -1,0 +1,25 @@
+{
+  "name": "pouchdb-adapter-s3",
+  "version": "0.1.0",
+  "description": "AWS s3 PouchDB ",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "AWS",
+    "s3",
+    "PouchDB"
+  ],
+  "author": "Anthony Ellison <aellison@mobilewebapp.net> (www.mobilewebapp.net)",
+  "license": "MIT",
+  "dependencies": {
+    "aws-sdk": "^2.96.0",
+    "uuid": "^3.1.0"
+  },
+  "devDependencies": {
+    "pouchdb": "^6.3.4"
+  },
+  "repository": {},
+  "bugs": {}
+}
