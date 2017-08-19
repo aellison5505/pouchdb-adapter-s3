@@ -16,7 +16,7 @@ var db = new PouchDB('mydb', {
   adapter: 's3',
   region: 'us-east-1',
   bucket: 'jbmdl.pouchdb',
-  c: cred
+  credentials: cred
 });
 
 fx1 = function() {
@@ -34,15 +34,23 @@ fx1 = function() {
 fx2 = function() {
   db.put({
     _id: 'mydoc',
-    title: 'Heroes'
+    title: 'this is good'
   }, function(err, response) {
     if (err) {
-      return console.log(err);
+      return console.log('re ',err);
     }
     // handle response
     console.log('re',response);
   });
 }
 
+fx3 = function() {
+  db.get('mydoc1', function(err, doc) {
+  if (err) { return console.log(err); }
+  else {
+    console.log(doc);
+  }
+});
+}
 
-fx1();
+fx3();

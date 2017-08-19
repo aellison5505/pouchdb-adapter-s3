@@ -37,7 +37,7 @@ function put(key, body, callback){
     Body: body
   };
 
-  console.log(params);
+  //console.log(params);
   s3.putObject(params, function(err, data) {
     callback(err, data);
   });

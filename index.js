@@ -1,9 +1,21 @@
 var uuid = require('uuid');
 var utils = require('pouchdb-adapter-utils');
 var db = require('./backend');
+var merge = require('pouchdb-merge');
+var error = require('pouchdb-errors');
 var ADAPTER_NAME = 's3';
 var metadata = {};
 var api = null;
+
+function getWinningRev(doc_metadata) {
+  return 'winningRev' in doc_metadata ?
+    doc_metadata.winningRev : merge.winningRev(metadata);
+}
+
+function getIsDeleted(doc_metadata, winningRev) {
+  return 'deleted' in metadata ?
+    doc_metadata.deleted : utils.isDeleted(doc_metadata, winningRev);
+}
 
 function build_db(callback) {
   metadata.uuid = uuid.v4().toString();
@@ -12,7 +24,7 @@ function build_db(callback) {
   db.put('db_uuid', metadata.uuid, function(err, data) {
     if (err) console.log(err, err.stack); // an error occurred
     else {
-      console.log(data); // successful response
+      //console.log(data); // successful response
       fx1();
     }
   });
@@ -21,7 +33,7 @@ function build_db(callback) {
     db.put('db_doc_count', '0', function(err, data) {
       if (err) console.log(err, err.stack); // an error occurred
       else {
-        console.log(data); // successful response
+        //console.log(data); // successful response
         fx2();
       }
     });
@@ -30,7 +42,7 @@ function build_db(callback) {
     db.put('db_seq', '0', function(err, data) {
       if (err) console.log(err, err.stack); // an error occurred
       else {
-        console.log(data); // successful response
+        //console.log(data); // successful response
         callback(null);
       }
     });
@@ -40,13 +52,13 @@ function build_db(callback) {
 
 function s3DBPouch(opts, callback) {
   api = this;
-
+  //console.log(opts);
   metadata.db_name = opts.name.replace('_pouch_', '');
   metadata.bucket = opts.bucket;
   metadata.prex = metadata.db_name + '/';
   metadata.apiVersion = '2006-03-01';
   metadata.sslEnabled = true;
-  metadata.credentials = opts.c;
+  metadata.credentials = opts.credentials;
 
   db.load(metadata);
 
@@ -62,7 +74,7 @@ function s3DBPouch(opts, callback) {
       console.log(err.code); // an error occurred
       build_db(function(err, sec) {
         if (err) {
-          console.log(err);
+          //console.log(err);
           return;
         } else {
           fxFinalLoad();
@@ -76,7 +88,7 @@ function s3DBPouch(opts, callback) {
   });
 
   fxFinalLoad = function() {
-    console.log(metadata);
+    //console.log(metadata);
 
 
     api._remote = true;
@@ -85,6 +97,7 @@ function s3DBPouch(opts, callback) {
       return ADAPTER_NAME;
     };
 
+    //check if idb is needed?
     api._id = function(idb, cb) {
       cb(null, metadata.db_name);
     };
@@ -94,6 +107,7 @@ function s3DBPouch(opts, callback) {
       db.get('db_doc_count', function(err, data) {
         if (err) {
           console.log(err);
+          final(err);
         } else {
           metadata.count = Number(data.Body.toString());
           fx2();
@@ -104,34 +118,90 @@ function s3DBPouch(opts, callback) {
         db.get('db_doc_count', function(err, data) {
           if (err) {
             console.log(err);
+            final(err);
           } else {
             metadata.seq = Number(data.Body.toString());
-            final();
+            final(null);
           }
         });
       }
 
-      function final() {
+      function final(err) {
         process.nextTick(function() {
-          callback(null, {
-            db_name: metadata.db_name,
-            doc_count: metadata.count,
-            update_seq: metadata.seq
-          });
+          if (err) {
+            callback(err);
+          } else {
+            callback(null, {
+                db_name: metadata.db_name,
+                doc_count: metadata.count,
+                update_seq: metadata.seq
+
+            });
+          }
         });
       }
     };
 
 
-    api._get = function(db, id, opts, callback) {
+    api._get = function(id, opts, callback) {
 
-      callback(null, {
-        doc: result,
-        metadata: doc,
-        ctx: openTxn
-      });
+       //opts = utils.clone(opts);
+        console.log(opts);
 
-    }
+         db.get('docs/db_doc_' + id, function(err, data) {
+
+         if (err || !data) {
+           return callback(error.createError(error.MISSING_DOC, 'missing'));
+         }
+
+         doc_metadata = JSON.parse(data.Body.toString());
+
+         var rev;
+         console.log(doc_metadata);
+
+         if (!opts.rev) {
+           rev = getWinningRev(doc_metadata);
+           var deleted = getIsDeleted(doc_metadata, rev);
+           if (deleted) {
+             return callback(error.createError(error.MISSING_DOC, "deleted"));
+           }
+         } else {
+           rev = opts.latest ? error.latest(opts.rev, doc_metadata) : opts.rev;
+         }
+
+         var seq = doc_metadata.rev_map[rev];
+
+         db.get('seqs/db_seq_' + seq, function(err, data2) {
+
+           if (!data2) {
+             return callback(error.createError(error.MISSING_DOC));
+           }
+
+           doc = JSON.parse(data2.Body.toString());
+
+           /* istanbul ignore if */
+           if ('_id' in doc && doc._id !== doc_metadata.id) {
+             // this failing implies something very wrong
+             return callback(new Error('wrong doc returned'));
+           }
+           doc._id = doc_metadata.id;
+           if ('_rev' in doc) {
+             /* istanbul ignore if */
+             if (doc._rev !== rev) {
+               // this failing implies something very wrong
+               return callback(new Error('wrong doc returned'));
+             }
+           } else {
+             // we didn't always store this
+             doc._rev = rev;
+           }
+           return callback(null, {
+             doc: doc,
+             metadata: doc_metadata
+           });
+         });
+       });
+     }
 
 
     api._bulkDocs = function(req, opts, FxCallback) {
@@ -174,11 +244,11 @@ function s3DBPouch(opts, callback) {
         return callback(infoErrors[0]);
       }
 
-      console.log(docInfos);
-      console.log(docInfos[0].metadata.rev_tree[0]);
+      //console.log(docInfos);
+      //console.log(docInfos[0].metadata.rev_tree[0]);
 
       function complete() {
-        console.log('we done');
+        //console.log('we done');
 
         opts.done = true;
         FxCallback(null, results);
@@ -186,8 +256,6 @@ function s3DBPouch(opts, callback) {
       }
 
       function writeDoc(docInfo, winningRev, winningRevIsDeleted, newRevIsDeleted, isUpdate, delta, resultsIdx, callback2) {
-
-
 
         function getNewSeq(callback, callback2) {
 
@@ -204,9 +272,9 @@ function s3DBPouch(opts, callback) {
             //put to db
             db.put('db_seq', seq.toString(), function(err, data) {
               if (err) console.log(err, 'seq err'); // an error occurred
-              else console.log(data); // successful response
+              else {}//console.log(data); // successful response
             });
-            console.log(seq);
+            //console.log(seq);
             callback(seq, callback2);
           }
 
@@ -226,9 +294,9 @@ function s3DBPouch(opts, callback) {
             //put to db
             db.put('db_doc_count', num.toString(), function(err, data) {
               if (err) console.log(err, err.stack); // an error occurred
-              else console.log(data); // successful response
+              else {}//console.log(data); // successful response
             });
-            console.log(num, ' popDoc');
+            //console.log(num, ' popDoc');
             callback();
           }
         }
@@ -264,26 +332,26 @@ function s3DBPouch(opts, callback) {
 
           db.put('seqs/db_seq_' + seq, JSON.stringify(docInfo.data), function(err, data) {
             if (err) console.log(err, 'data'); // an error occurred
-            else console.log(data); // successful response
+            else {}//console.log(data); // successful response
           });
 
           db.put('docs/db_doc_' + docInfo.metadata.id, JSON.stringify(docInfo.metadata), function(err, data) {
             if (err) console.log(err, 'meta'); // an error occurred
-            else console.log(data); // successful response
+            else {}//console.log(data); // successful response
           });
 
-          console.log(seq);
+          //console.log(seq);
           popDocNum(callback);
 
 
           console.log(docInfo);
-          console.log(winningRev);
-          console.log(isUpdate);
-          console.log(resultsIdx);
+          //console.log(winningRev);
+          //console.log(isUpdate);
+          //console.log(resultsIdx);
         }
 
         fxDone = function() {
-          console.log('fxdone');
+          //console.log('fxdone');
           results[resultsIdx] = {
             ok: true,
             id: docInfo.metadata.id,
@@ -295,14 +363,55 @@ function s3DBPouch(opts, callback) {
 
         getNewSeq(fxFin, fxDone);
 
+        }
+
+//end write doc
+
+      processDocs = function (err){
+        if(err){
+          FxCallback(err);
+          console.log(err);
+          return;
+        }else{
+        utils.processDocs(revLimit, docInfos, api, fetchedDocs, tx, results,writeDoc, opts, complete);
+        }
       }
 
+
+      docDoneCount = 0;
       revLimit = 1000;
       tx = null;
       i = 0;
+      var sendErr = null;
+
+      function docDone() {
+        if(++docDoneCount === userDocs.length){
+          processDocs(sendErr);
+          console.log(sendErr);
+        }
+      }
+
       //!!!!!!!!!! Fetch Docs?!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-      utils.processDocs(revLimit, docInfos, api, fetchedDocs, tx, results,
-        writeDoc, opts, complete);
+      userDocs.forEach(function(doc) {
+        //!!!!!!!!!!!!put real get in!!!!!!!!!!!!!!!!!!!!!
+        db.get('docs/db_doc_'+doc._id, function(err, data){
+          if (err) {
+          //  throw(new Error(err.code));
+          if(err.code !== 'NoSuchKey' ){
+            if(!sendErr){
+              sendErr = [];
+            }
+            sendErr = err.code;
+            console.log(err.code);
+          }
+          } else {
+            fetchedDocs.set(doc._id, JSON.parse(data.Body.toString()));
+            //console.log(fetchedDocs.get(doc._id));
+          }
+          docDone();
+        });
+
+      });
 
     };
 
