@@ -6,6 +6,7 @@ var error = require('pouchdb-errors');
 var ADAPTER_NAME = 's3';
 var metadata = {};
 var api = null;
+var id_index = null;
 
 function getWinningRev(doc_metadata) {
   return 'winningRev' in doc_metadata ?
@@ -17,17 +18,102 @@ function getIsDeleted(doc_metadata, winningRev) {
     doc_metadata.deleted : utils.isDeleted(doc_metadata, winningRev);
 }
 
+function IdIndex(id_index, callback) {
+
+  var index = id_index;
+
+  if (index===null){
+    loadIndex(function(err){
+      if (err){
+        callback(err);
+      }else{
+        callback(null);
+      }
+    })
+  }
+
+  function asending(start, end, callback) {
+    var start_indx = 0;
+
+    if (start) {
+
+    }
+
+    function processList() {
+
+    }
+
+  }
+
+  function decending(start, end, callback){
+
+  }
+
+  function addDoc(id, callack) {
+
+    if(index===null){
+      loadIndex(function(err){
+        if(err) {
+          callack(err);
+        }else {
+
+        }
+      })
+    }
+
+  }
+
+  function loadPage(callback){
+
+  }
+
+  function checkValid(callback) {
+
+  }
+
+  function loadIndex(callback) {
+
+    db.get('db_index', function(err, data) {
+      if(err) {
+        return callback(err);
+      }else {
+        index.ETag = data.ETag;
+        index.pages = JSON.parse(data.Body.toString());
+        if(index.pages.length===0){
+          createPage([],'1000000000',function (err){
+            if(err){
+              callback(err);
+            }else{
+              callback(null);
+            }
+          });
+        }
+        callback(null);
+      }
+    });
+
+
+  }
+
+  function createPage(keys, pageName, callback){
+
+  }
+
+  function saveIndex() {
+
+  }
+
+  function removeDoc() {
+
+  }
+
+
+}
+
 function build_db(callback) {
   metadata.uuid = uuid.v4().toString();
 
 
-  db.put('db_uuid', metadata.uuid, function(err, data) {
-    if (err) console.log(err, err.stack); // an error occurred
-    else {
-      //console.log(data); // successful response
-      fx1();
-    }
-  });
 
   fx1 = function() {
     db.put('db_doc_count', '0', function(err, data) {
@@ -43,10 +129,28 @@ function build_db(callback) {
       if (err) console.log(err, err.stack); // an error occurred
       else {
         //console.log(data); // successful response
-        callback(null);
+        fx3();
       }
     });
   }
+
+  fx3 = function() {
+    db.put('db_index', '{}', function(err, data) {
+      if (err) console.log(err, err.stack); // an error occurred
+      else {
+        //console.log(data); // successful response
+        fx4();
+      }
+    });
+  }
+
+  fx4 = db.put('db_uuid', metadata.uuid, function(err, data) {
+    if (err) console.log(err, err.stack); // an error occurred
+    else {
+      //console.log(data); // successful response
+      callback(null);
+    }
+  });
 
 }
 
@@ -59,6 +163,7 @@ function s3DBPouch(opts, callback) {
   metadata.apiVersion = '2006-03-01';
   metadata.sslEnabled = true;
   metadata.credentials = opts.credentials;
+  metadata.region = opts.region;
 
   db.load(metadata);
 
@@ -132,9 +237,9 @@ function s3DBPouch(opts, callback) {
             callback(err);
           } else {
             callback(null, {
-                db_name: metadata.db_name,
-                doc_count: metadata.count,
-                update_seq: metadata.seq
+              db_name: metadata.db_name,
+              doc_count: metadata.count,
+              update_seq: metadata.seq
 
             });
           }
@@ -145,63 +250,63 @@ function s3DBPouch(opts, callback) {
 
     api._get = function(id, opts, callback) {
 
-       //opts = utils.clone(opts);
-        console.log(opts);
+      //opts = utils.clone(opts);
+      console.log(opts);
 
-         db.get('docs/db_doc_' + id, function(err, data) {
+      db.get('docs/db_doc_' + id, function(err, data) {
 
-         if (err || !data) {
-           return callback(error.createError(error.MISSING_DOC, 'missing'));
-         }
+        if (err || !data) {
+          return callback(error.createError(error.MISSING_DOC, 'missing'));
+        }
 
-         doc_metadata = JSON.parse(data.Body.toString());
+        doc_metadata = JSON.parse(data.Body.toString());
 
-         var rev;
-         console.log(doc_metadata);
+        var rev;
+        console.log(doc_metadata);
 
-         if (!opts.rev) {
-           rev = getWinningRev(doc_metadata);
-           var deleted = getIsDeleted(doc_metadata, rev);
-           if (deleted) {
-             return callback(error.createError(error.MISSING_DOC, "deleted"));
-           }
-         } else {
-           rev = opts.latest ? error.latest(opts.rev, doc_metadata) : opts.rev;
-         }
+        if (!opts.rev) {
+          rev = getWinningRev(doc_metadata);
+          var deleted = getIsDeleted(doc_metadata, rev);
+          if (deleted) {
+            return callback(error.createError(error.MISSING_DOC, "deleted"));
+          }
+        } else {
+          rev = opts.latest ? error.latest(opts.rev, doc_metadata) : opts.rev;
+        }
 
-         var seq = doc_metadata.rev_map[rev];
+        var seq = doc_metadata.rev_map[rev];
 
-         db.get('seqs/db_seq_' + seq, function(err, data2) {
+        db.get('seqs/db_seq_' + seq, function(err, data2) {
 
-           if (!data2) {
-             return callback(error.createError(error.MISSING_DOC));
-           }
+          if (!data2) {
+            return callback(error.createError(error.MISSING_DOC));
+          }
 
-           doc = JSON.parse(data2.Body.toString());
+          doc = JSON.parse(data2.Body.toString());
 
-           /* istanbul ignore if */
-           if ('_id' in doc && doc._id !== doc_metadata.id) {
-             // this failing implies something very wrong
-             return callback(new Error('wrong doc returned'));
-           }
-           doc._id = doc_metadata.id;
-           if ('_rev' in doc) {
-             /* istanbul ignore if */
-             if (doc._rev !== rev) {
-               // this failing implies something very wrong
-               return callback(new Error('wrong doc returned'));
-             }
-           } else {
-             // we didn't always store this
-             doc._rev = rev;
-           }
-           return callback(null, {
-             doc: doc,
-             metadata: doc_metadata
-           });
-         });
-       });
-     }
+          /* istanbul ignore if */
+          if ('_id' in doc && doc._id !== doc_metadata.id) {
+            // this failing implies something very wrong
+            return callback(new Error('wrong doc returned'));
+          }
+          doc._id = doc_metadata.id;
+          if ('_rev' in doc) {
+            /* istanbul ignore if */
+            if (doc._rev !== rev) {
+              // this failing implies something very wrong
+              return callback(new Error('wrong doc returned'));
+            }
+          } else {
+            // we didn't always store this
+            doc._rev = rev;
+          }
+          return callback(null, {
+            doc: doc,
+            metadata: doc_metadata
+          });
+        });
+      });
+    }
 
 
     api._bulkDocs = function(req, opts, FxCallback) {
@@ -272,7 +377,7 @@ function s3DBPouch(opts, callback) {
             //put to db
             db.put('db_seq', seq.toString(), function(err, data) {
               if (err) console.log(err, 'seq err'); // an error occurred
-              else {}//console.log(data); // successful response
+              else {} //console.log(data); // successful response
             });
             //console.log(seq);
             callback(seq, callback2);
@@ -294,7 +399,7 @@ function s3DBPouch(opts, callback) {
             //put to db
             db.put('db_doc_count', num.toString(), function(err, data) {
               if (err) console.log(err, err.stack); // an error occurred
-              else {}//console.log(data); // successful response
+              else {} //console.log(data); // successful response
             });
             //console.log(num, ' popDoc');
             callback();
@@ -332,12 +437,12 @@ function s3DBPouch(opts, callback) {
 
           db.put('seqs/db_seq_' + seq, JSON.stringify(docInfo.data), function(err, data) {
             if (err) console.log(err, 'data'); // an error occurred
-            else {}//console.log(data); // successful response
+            else {} //console.log(data); // successful response
           });
 
           db.put('docs/db_doc_' + docInfo.metadata.id, JSON.stringify(docInfo.metadata), function(err, data) {
             if (err) console.log(err, 'meta'); // an error occurred
-            else {}//console.log(data); // successful response
+            else {} //console.log(data); // successful response
           });
 
           //console.log(seq);
@@ -363,17 +468,17 @@ function s3DBPouch(opts, callback) {
 
         getNewSeq(fxFin, fxDone);
 
-        }
+      }
 
-//end write doc
+      //end write doc
 
-      processDocs = function (err){
-        if(err){
+      processDocs = function(err) {
+        if (err) {
           FxCallback(err);
           console.log(err);
           return;
-        }else{
-        utils.processDocs(revLimit, docInfos, api, fetchedDocs, tx, results,writeDoc, opts, complete);
+        } else {
+          utils.processDocs(revLimit, docInfos, api, fetchedDocs, tx, results, writeDoc, opts, complete);
         }
       }
 
@@ -385,7 +490,7 @@ function s3DBPouch(opts, callback) {
       var sendErr = null;
 
       function docDone() {
-        if(++docDoneCount === userDocs.length){
+        if (++docDoneCount === userDocs.length) {
           processDocs(sendErr);
           console.log(sendErr);
         }
@@ -394,16 +499,16 @@ function s3DBPouch(opts, callback) {
       //!!!!!!!!!! Fetch Docs?!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
       userDocs.forEach(function(doc) {
         //!!!!!!!!!!!!put real get in!!!!!!!!!!!!!!!!!!!!!
-        db.get('docs/db_doc_'+doc._id, function(err, data){
+        db.get('docs/db_doc_' + doc._id, function(err, data) {
           if (err) {
-          //  throw(new Error(err.code));
-          if(err.code !== 'NoSuchKey' ){
-            if(!sendErr){
-              sendErr = [];
+            //  throw(new Error(err.code));
+            if (err.code !== 'NoSuchKey') {
+              if (!sendErr) {
+                sendErr = [];
+              }
+              sendErr = err.code;
+              console.log(err.code);
             }
-            sendErr = err.code;
-            console.log(err.code);
-          }
           } else {
             fetchedDocs.set(doc._id, JSON.parse(data.Body.toString()));
             //console.log(fetchedDocs.get(doc._id));

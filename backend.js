@@ -10,6 +10,7 @@ function load(mdata){
   var params = {
     apiVersion: metadata.apiVersion,
     sslEnabled: true,
+    region: metadata.region,
     credentials: metadata.credentials
   };
 
